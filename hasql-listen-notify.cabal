@@ -1,0 +1,11 @@
+cabal-version: 2.4
+
+name: hasql-listen-notify
+version: 0.1.0
+
+library
+  build-depends: base, bytestring, text, hasql
+  default-language: Haskell2010
+  exposed-modules: Hasql.ListenNotify
+  ghc-options: -Wall
+  hs-source-dirs: src

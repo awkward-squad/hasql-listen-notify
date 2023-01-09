@@ -4,16 +4,17 @@ name: hasql-listen-notify
 version: 0.1.0
 
 library
-  build-depends: 
-    base ^>= 4.15 || ^>= 4.16 || ^>= 4.17, 
-    bytestring ^>= 0.11.3, 
+  build-depends:
+    base ^>= 4.15 || ^>= 4.16 || ^>= 4.17,
+    bytestring ^>= 0.11.3,
     hasql ^>= 1.6.3,
-    mtl ^>= 2.2 || ^>= 2.3.1, 
+    mtl ^>= 2.2 || ^>= 2.3.1,
     postgresql-libpq ^>= 0.9.5,
-    text ^>= 2.0, 
-  default-extensions: 
+    text ^>= 2.0,
+  default-extensions:
     BlockArguments
     LambdaCase
+    NamedFieldPuns
     OverloadedStrings
   default-language: Haskell2010
   exposed-modules: Hasql.ListenNotify

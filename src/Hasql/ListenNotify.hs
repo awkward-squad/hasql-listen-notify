@@ -15,7 +15,6 @@ module Hasql.ListenNotify
     -- * Notify
     Notify (..),
     notify,
-    notify2,
   )
 where
 
@@ -161,24 +160,8 @@ data Notify = Notify
 -- | Notify a channel.
 --
 -- https://www.postgresql.org/docs/current/sql-notify.html
-notify :: Text -> Statement Text ()
-notify chan =
-  Statement sql encoder Decoders.noResult True
-  where
-    sql :: ByteString
-    sql =
-      builderToByteString ("SELECT pg_notify('" <> escapeString chan <> "', $1)")
-
-    encoder :: Encoders.Params Text
-    encoder =
-      Encoders.param (Encoders.nonNullable Encoders.text)
-
--- | Variant of 'notify' that prepares a query with a parameter for the channel.
---
--- You may prefer this variant if you have a large number of channels to notify and don't want to prepare a separate
--- query for each one.
-notify2 :: Statement Notify ()
-notify2 =
+notify :: Statement Notify ()
+notify =
   Statement sql encoder Decoders.noResult True
   where
     sql :: ByteString
@@ -218,14 +201,6 @@ escapeIdentifier ident =
             )
         )
         (ByteString.Builder.Prim.liftFixedToBounded ByteString.Builder.Prim.word8)
-
-escapeString :: Text -> ByteString.Builder.Builder
-escapeString string =
-  Text.encodeUtf8BuilderEscaped escape string
-  where
-    escape :: ByteString.Builder.Prim.BoundedPrim Word8
-    escape =
-      undefined
 
 -- Parse a Notify from a LibPQ.Notify
 parseNotification :: LibPQ.Notify -> Notification

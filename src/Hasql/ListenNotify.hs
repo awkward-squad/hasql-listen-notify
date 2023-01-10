@@ -32,6 +32,7 @@ import qualified Data.Text.Encoding as Text
 import Data.Word (Word8)
 import qualified Database.PostgreSQL.LibPQ as LibPQ
 import GHC.Conc.IO (threadWaitRead, threadWaitWrite)
+import GHC.Generics (Generic)
 import qualified Hasql.Connection as Connection
 import qualified Hasql.Decoders as Decoders
 import qualified Hasql.Encoders as Encoders
@@ -75,6 +76,7 @@ data Notification = Notification
     payload :: !Text,
     pid :: !CPid
   }
+  deriving stock (Eq, Generic, Show)
 
 -- | Get the next notification received from the server.
 --
@@ -154,6 +156,7 @@ data Notify = Notify
   { channel :: !Text,
     payload :: !Text
   }
+  deriving stock (Eq, Generic, Show)
 
 -- | Notify a channel.
 --
@@ -164,7 +167,7 @@ notify chan =
   where
     sql :: ByteString
     sql =
-      builderToByteString ("NOTIFY \"" <> escapeIdentifier chan <> "\", $1")
+      builderToByteString ("SELECT pg_notify('" <> escapeString chan <> "', $1)")
 
     encoder :: Encoders.Params Text
     encoder =
@@ -215,6 +218,14 @@ escapeIdentifier ident =
             )
         )
         (ByteString.Builder.Prim.liftFixedToBounded ByteString.Builder.Prim.word8)
+
+escapeString :: Text -> ByteString.Builder.Builder
+escapeString string =
+  Text.encodeUtf8BuilderEscaped escape string
+  where
+    escape :: ByteString.Builder.Prim.BoundedPrim Word8
+    escape =
+      undefined
 
 -- Parse a Notify from a LibPQ.Notify
 parseNotification :: LibPQ.Notify -> Notification

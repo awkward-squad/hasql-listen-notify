@@ -13,6 +13,8 @@ library
     text ^>= 2.0,
   default-extensions:
     BlockArguments
+    DeriveGeneric
+    DerivingStrategies
     DuplicateRecordFields
     LambdaCase
     NamedFieldPuns

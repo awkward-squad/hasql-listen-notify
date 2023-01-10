@@ -1,17 +1,21 @@
 module Hasql.ListenNotify
   ( -- * Listen
+
+    -- ** Listen
     listen,
     unlisten,
     unlistenAll,
+
+    -- ** Await
+    Notification (..),
+    await,
+    poll,
+    backendPid,
 
     -- * Notify
     Notify (..),
     notify,
     notify2,
-    Notification (..),
-    await,
-    poll,
-    backendPid,
   )
 where
 
@@ -64,44 +68,6 @@ unlisten chan =
 unlistenAll :: Statement () ()
 unlistenAll =
   Statement "UNLISTEN *" Encoders.noParams Decoders.noResult False
-
--- | An outgoing notification.
-data Notify = Notify
-  { channel :: !Text,
-    payload :: !Text
-  }
-
--- | Notify a channel.
---
--- https://www.postgresql.org/docs/current/sql-notify.html
-notify :: Text -> Statement Text ()
-notify chan =
-  Statement sql encoder Decoders.noResult True
-  where
-    sql :: ByteString
-    sql =
-      builderToByteString ("NOTIFY \"" <> escapeIdentifier chan <> "\", $1")
-
-    encoder :: Encoders.Params Text
-    encoder =
-      Encoders.param (Encoders.nonNullable Encoders.text)
-
--- | Variant of 'notify' that prepares a query with a parameter for the channel.
---
--- You may prefer this variant if you have a large number of channels to notify and don't want to prepare a separate
--- query for each one.
-notify2 :: Statement Notify ()
-notify2 =
-  Statement sql encoder Decoders.noResult True
-  where
-    sql :: ByteString
-    sql =
-      "SELECT pg_notify($1, $2)"
-
-    encoder :: Encoders.Params Notify
-    encoder =
-      ((\Notify {channel} -> channel) >$< Encoders.param (Encoders.nonNullable Encoders.text))
-        <> ((\Notify {payload} -> payload) >$< Encoders.param (Encoders.nonNullable Encoders.text))
 
 -- | An incoming notification.
 data Notification = Notification
@@ -182,6 +148,44 @@ poll =
 backendPid :: Session CPid
 backendPid =
   libpq LibPQ.backendPID
+
+-- | An outgoing notification.
+data Notify = Notify
+  { channel :: !Text,
+    payload :: !Text
+  }
+
+-- | Notify a channel.
+--
+-- https://www.postgresql.org/docs/current/sql-notify.html
+notify :: Text -> Statement Text ()
+notify chan =
+  Statement sql encoder Decoders.noResult True
+  where
+    sql :: ByteString
+    sql =
+      builderToByteString ("NOTIFY \"" <> escapeIdentifier chan <> "\", $1")
+
+    encoder :: Encoders.Params Text
+    encoder =
+      Encoders.param (Encoders.nonNullable Encoders.text)
+
+-- | Variant of 'notify' that prepares a query with a parameter for the channel.
+--
+-- You may prefer this variant if you have a large number of channels to notify and don't want to prepare a separate
+-- query for each one.
+notify2 :: Statement Notify ()
+notify2 =
+  Statement sql encoder Decoders.noResult True
+  where
+    sql :: ByteString
+    sql =
+      "SELECT pg_notify($1, $2)"
+
+    encoder :: Encoders.Params Notify
+    encoder =
+      ((\Notify {channel} -> channel) >$< Encoders.param (Encoders.nonNullable Encoders.text))
+        <> ((\Notify {payload} -> payload) >$< Encoders.param (Encoders.nonNullable Encoders.text))
 
 --
 

@@ -9,8 +9,8 @@ module Hasql.ListenNotify
     notify,
     notify2,
     Notification (..),
-    poll,
     await,
+    poll,
     backendPid,
   )
 where

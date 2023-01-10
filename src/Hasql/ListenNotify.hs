@@ -100,14 +100,14 @@ await_ conn =
             -- "No connection is currently open"
             Nothing -> do
               LibPQ.resetStart conn >>= \case
-                False -> queryError
+                False -> pqNotifiesQueryError conn
                 True -> do
                   -- Assuming single-threaded access to the connection, which is the only sane way to use a connection,
                   -- `PQsocket` can't fail after a successful `PQresetStart`.
                   Just socket <- LibPQ.socket conn
                   let pollForConnection :: LibPQ.PollingStatus -> IO (Either Session.QueryError LibPQ.Notify)
                       pollForConnection = \case
-                        LibPQ.PollingFailed -> queryError
+                        LibPQ.PollingFailed -> pqNotifiesQueryError conn
                         LibPQ.PollingOk -> pollForNotification
                         LibPQ.PollingReading -> do
                           threadWaitRead socket
@@ -128,19 +128,30 @@ await_ conn =
               -- PQconsumeInput is provided for when we don't have anything to do except populate the notification
               -- buffer. But it can fail, which is weird; just propagate those failures as query errors.
               LibPQ.consumeInput conn >>= \case
-                False -> queryError
+                False -> pqNotifiesQueryError conn
                 True -> pollForNotification
         Just notification -> pure (Right notification)
-
-    queryError :: IO (Either Session.QueryError a)
-    queryError = do
-      message <- LibPQ.errorMessage conn
-      pure (Left (Session.QueryError "PQnotifies()" [] (Session.ClientError message)))
 
 -- | Variant of 'await' that doesn't block.
 poll :: Session (Maybe Notification)
 poll =
-  libpq \conn -> fmap parseNotification <$> LibPQ.notifies conn
+  libpq poll_ >>= \case
+    Left err -> throwError err
+    Right maybeNotification -> pure (parseNotification <$> maybeNotification)
+
+poll_ :: LibPQ.Connection -> IO (Either Session.QueryError (Maybe LibPQ.Notify))
+poll_ conn =
+  LibPQ.notifies conn >>= \case
+    Nothing ->
+      LibPQ.consumeInput conn >>= \case
+        False -> pqNotifiesQueryError conn
+        True -> Right <$> LibPQ.notifies conn
+    notification@(Just _) -> pure (Right notification)
+
+pqNotifiesQueryError :: LibPQ.Connection -> IO (Either Session.QueryError a)
+pqNotifiesQueryError conn = do
+  message <- LibPQ.errorMessage conn
+  pure (Left (Session.QueryError "PQnotifies()" [] (Session.ClientError message)))
 
 -- | Get the PID of the backend process handling this session. This can be used to filter out notifications that
 -- originate from this session.

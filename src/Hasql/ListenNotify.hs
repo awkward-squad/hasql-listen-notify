@@ -18,10 +18,12 @@ module Hasql.ListenNotify
   )
 where
 
+import Control.Exception (throwIO, try)
 import Control.Monad.Except (throwError)
 import Control.Monad.IO.Class
 import Control.Monad.Reader (ask)
 import Data.ByteString (ByteString)
+import qualified Data.ByteString.Builder as ByteString (Builder)
 import qualified Data.ByteString.Builder as ByteString.Builder
 import qualified Data.ByteString.Builder.Prim as ByteString.Builder.Prim
 import qualified Data.ByteString.Lazy as ByteString.Lazy
@@ -45,22 +47,22 @@ import System.Posix.Types (CPid)
 -- https://www.postgresql.org/docs/current/sql-listen.html
 listen :: Text -> Statement () ()
 listen chan =
-  Statement sql Encoders.noParams Decoders.noResult False
+  Statement (builderToByteString sql) Encoders.noParams Decoders.noResult False
   where
-    sql :: ByteString
+    sql :: ByteString.Builder
     sql =
-      builderToByteString ("LISTEN \"" <> escapeIdentifier chan <> "\"")
+      "LISTEN \"" <> escapeIdentifier chan <> "\""
 
 -- | Stop listening to a channel.
 --
 -- https://www.postgresql.org/docs/current/sql-unlisten.html
 unlisten :: Text -> Statement () ()
 unlisten chan =
-  Statement sql Encoders.noParams Decoders.noResult False
+  Statement (builderToByteString sql) Encoders.noParams Decoders.noResult False
   where
-    sql :: ByteString
+    sql :: ByteString.Builder
     sql =
-      builderToByteString ("UNLISTEN \"" <> escapeIdentifier chan <> "\"")
+      "UNLISTEN \"" <> escapeIdentifier chan <> "\""
 
 -- | Stop listening to all channels.
 --
@@ -82,76 +84,69 @@ data Notification = Notification
 -- https://www.postgresql.org/docs/current/libpq-notify.html
 await :: Session Notification
 await =
-  libpq await_ >>= \case
+  libpq (\conn -> try (await_ conn)) >>= \case
     Left err -> throwError err
     Right notification -> pure (parseNotification notification)
 
-await_ :: LibPQ.Connection -> IO (Either Session.QueryError LibPQ.Notify)
+await_ :: LibPQ.Connection -> IO LibPQ.Notify
 await_ conn =
   pollForNotification
   where
-    pollForNotification :: IO (Either Session.QueryError LibPQ.Notify)
+    pollForNotification :: IO LibPQ.Notify
     pollForNotification =
-      LibPQ.notifies conn >>= \case
+      poll_ conn >>= \case
         -- Block until a notification arrives. Snag: the connection might be closed (what). If so, attempt to reset it
         -- and poll for a notification on the new connection.
         Nothing ->
           LibPQ.socket conn >>= \case
             -- "No connection is currently open"
             Nothing -> do
-              LibPQ.resetStart conn >>= \case
-                False -> pqNotifiesQueryError conn
-                True -> do
-                  -- Assuming single-threaded access to the connection, which is the only sane way to use a connection,
-                  -- `PQsocket` can't fail after a successful `PQresetStart`.
-                  Just socket <- LibPQ.socket conn
-                  let pollForConnection :: LibPQ.PollingStatus -> IO (Either Session.QueryError LibPQ.Notify)
-                      pollForConnection = \case
-                        LibPQ.PollingFailed -> pqNotifiesQueryError conn
-                        LibPQ.PollingOk -> pollForNotification
-                        LibPQ.PollingReading -> do
-                          threadWaitRead socket
-                          pollForConnectionAgain
-                        LibPQ.PollingWriting -> do
-                          threadWaitWrite socket
-                          pollForConnectionAgain
-                      pollForConnectionAgain :: IO (Either Session.QueryError LibPQ.Notify)
-                      pollForConnectionAgain = do
-                        status <- LibPQ.resetPoll conn
-                        pollForConnection status
-                  -- "On the first iteration, i.e., if you have yet to call PQconnectPoll, behave as if it last returned
-                  -- PGRES_POLLING_WRITING."
-                  pollForConnection LibPQ.PollingWriting
+              pqResetStart conn
+              -- Assuming single-threaded access to the connection, which is the only sane way to use a connection,
+              -- `PQsocket` can't fail after a successful `PQresetStart`.
+              Just socket <- LibPQ.socket conn
+              let pollForConnection :: LibPQ.PollingStatus -> IO LibPQ.Notify
+                  pollForConnection = \case
+                    LibPQ.PollingFailed -> throwPqNotifiesQueryError conn
+                    LibPQ.PollingOk -> pollForNotification
+                    LibPQ.PollingReading -> do
+                      threadWaitRead socket
+                      pollForConnectionAgain
+                    LibPQ.PollingWriting -> do
+                      threadWaitWrite socket
+                      pollForConnectionAgain
+                  pollForConnectionAgain :: IO LibPQ.Notify
+                  pollForConnectionAgain = do
+                    status <- LibPQ.resetPoll conn
+                    pollForConnection status
+              -- "On the first iteration, i.e., if you have yet to call PQconnectPoll, behave as if it last returned
+              -- PGRES_POLLING_WRITING."
+              pollForConnection LibPQ.PollingWriting
             Just socket -> do
               threadWaitRead socket
               -- Data has appeared on the socket, but libPQ won't buffer it for us unless we do something (PQexec, etc).
               -- PQconsumeInput is provided for when we don't have anything to do except populate the notification
-              -- buffer. But it can fail, which is weird; just propagate those failures as query errors.
-              LibPQ.consumeInput conn >>= \case
-                False -> pqNotifiesQueryError conn
-                True -> pollForNotification
-        Just notification -> pure (Right notification)
+              -- buffer.
+              pqConsumeInput conn
+              pollForNotification
+        Just notification -> pure notification
 
 -- | Variant of 'await' that doesn't block.
 poll :: Session (Maybe Notification)
 poll =
-  libpq poll_ >>= \case
+  libpq (\conn -> try (poll_ conn)) >>= \case
     Left err -> throwError err
     Right maybeNotification -> pure (parseNotification <$> maybeNotification)
 
-poll_ :: LibPQ.Connection -> IO (Either Session.QueryError (Maybe LibPQ.Notify))
+-- First call `notifies` to pop a notification off of the buffer, if there is one. If there isn't, try `consumeInput` to
+-- populate the buffer, followed by another followed by another `notifies`.
+poll_ :: LibPQ.Connection -> IO (Maybe LibPQ.Notify)
 poll_ conn =
   LibPQ.notifies conn >>= \case
-    Nothing ->
-      LibPQ.consumeInput conn >>= \case
-        False -> pqNotifiesQueryError conn
-        True -> Right <$> LibPQ.notifies conn
-    notification@(Just _) -> pure (Right notification)
-
-pqNotifiesQueryError :: LibPQ.Connection -> IO (Either Session.QueryError a)
-pqNotifiesQueryError conn = do
-  message <- LibPQ.errorMessage conn
-  pure (Left (Session.QueryError "PQnotifies()" [] (Session.ClientError message)))
+    Nothing -> do
+      pqConsumeInput conn
+      LibPQ.notifies conn
+    notification -> pure notification
 
 -- | Get the PID of the backend process handling this session. This can be used to filter out notifications that
 -- originate from this session.
@@ -184,6 +179,27 @@ notify =
       ((\Notify {channel} -> channel) >$< Encoders.param (Encoders.nonNullable Encoders.text))
         <> ((\Notify {payload} -> payload) >$< Encoders.param (Encoders.nonNullable Encoders.text))
 
+------------------------------------------------------------------------------------------------------------------------
+-- Little wrappers that throw
+
+pqConsumeInput :: LibPQ.Connection -> IO ()
+pqConsumeInput conn =
+  LibPQ.consumeInput conn >>= \case
+    False -> throwPqNotifiesQueryError conn
+    True -> pure ()
+
+pqResetStart :: LibPQ.Connection -> IO ()
+pqResetStart conn =
+  LibPQ.resetStart conn >>= \case
+    False -> throwPqNotifiesQueryError conn
+    True -> pure ()
+
+-- Throws a QueryError
+throwPqNotifiesQueryError :: LibPQ.Connection -> IO void
+throwPqNotifiesQueryError conn = do
+  message <- LibPQ.errorMessage conn
+  throwIO (Session.QueryError "PQnotifies()" [] (Session.ClientError message))
+
 --
 
 libpq :: (LibPQ.Connection -> IO a) -> Session a
@@ -191,13 +207,13 @@ libpq action = do
   conn <- ask
   liftIO (Connection.withLibPQConnection conn action)
 
-builderToByteString :: ByteString.Builder.Builder -> ByteString
+builderToByteString :: ByteString.Builder -> ByteString
 builderToByteString =
   ByteString.Lazy.toStrict . ByteString.Builder.toLazyByteString
 {-# INLINE builderToByteString #-}
 
 -- Escape " as "", so e.g. `listen "foo\"bar"` will send the literal bytes: LISTEN "foo""bar"
-escapeIdentifier :: Text -> ByteString.Builder.Builder
+escapeIdentifier :: Text -> ByteString.Builder
 escapeIdentifier ident =
   Text.encodeUtf8BuilderEscaped escape ident
   where

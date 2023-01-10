@@ -170,7 +170,7 @@ await_ conn =
       message <- LibPQ.errorMessage conn
       pure (Left (Session.QueryError "PQnotifies()" [] (Session.ClientError message)))
 
--- | A variant of 'await' that doesn't block.
+-- | Variant of 'await' that doesn't block.
 poll :: Session (Maybe Notification)
 poll =
   libpq \conn -> fmap parseNotification <$> LibPQ.notifies conn

@@ -32,7 +32,7 @@ import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
 import Data.Word (Word8)
 import qualified Database.PostgreSQL.LibPQ as LibPQ
-import GHC.Conc.IO (threadWaitRead, threadWaitWrite)
+import GHC.Conc.IO (threadWaitRead)
 import GHC.Generics (Generic)
 import qualified Hasql.Connection as Connection
 import qualified Hasql.Decoders as Decoders
@@ -101,27 +101,8 @@ await_ conn =
           LibPQ.socket conn >>= \case
             -- "No connection is currently open"
             Nothing -> do
-              pqResetStart conn
-              -- Assuming single-threaded access to the connection, which is the only sane way to use a connection,
-              -- `PQsocket` can't fail after a successful `PQresetStart`.
-              Just socket <- LibPQ.socket conn
-              let pollForConnection :: LibPQ.PollingStatus -> IO LibPQ.Notify
-                  pollForConnection = \case
-                    LibPQ.PollingFailed -> throwPqNotifiesQueryError conn
-                    LibPQ.PollingOk -> pollForNotification
-                    LibPQ.PollingReading -> do
-                      threadWaitRead socket
-                      pollForConnectionAgain
-                    LibPQ.PollingWriting -> do
-                      threadWaitWrite socket
-                      pollForConnectionAgain
-                  pollForConnectionAgain :: IO LibPQ.Notify
-                  pollForConnectionAgain = do
-                    status <- LibPQ.resetPoll conn
-                    pollForConnection status
-              -- "On the first iteration, i.e., if you have yet to call PQconnectPoll, behave as if it last returned
-              -- PGRES_POLLING_WRITING."
-              pollForConnection LibPQ.PollingWriting
+              pqReset conn
+              pollForNotification
             Just socket -> do
               threadWaitRead socket
               -- Data has appeared on the socket, but libPQ won't buffer it for us unless we do something (PQexec, etc).
@@ -185,20 +166,21 @@ notify =
 pqConsumeInput :: LibPQ.Connection -> IO ()
 pqConsumeInput conn =
   LibPQ.consumeInput conn >>= \case
-    False -> throwPqNotifiesQueryError conn
+    False -> throwQueryError conn "PQconsumeInput()"
     True -> pure ()
 
-pqResetStart :: LibPQ.Connection -> IO ()
-pqResetStart conn =
-  LibPQ.resetStart conn >>= \case
-    False -> throwPqNotifiesQueryError conn
-    True -> pure ()
+pqReset :: LibPQ.Connection -> IO ()
+pqReset conn = do
+  LibPQ.reset conn
+  LibPQ.status conn >>= \case
+    LibPQ.ConnectionOk -> throwQueryError conn "PQreset()"
+    _ -> pure ()
 
 -- Throws a QueryError
-throwPqNotifiesQueryError :: LibPQ.Connection -> IO void
-throwPqNotifiesQueryError conn = do
+throwQueryError :: LibPQ.Connection -> ByteString -> IO void
+throwQueryError conn context = do
   message <- LibPQ.errorMessage conn
-  throwIO (Session.QueryError "PQnotifies()" [] (Session.ClientError message))
+  throwIO (Session.QueryError context [] (Session.ClientError message))
 
 --
 

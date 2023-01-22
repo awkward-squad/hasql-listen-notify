@@ -2,10 +2,10 @@ module Hasql.ListenNotify
   ( -- * Listen
 
     -- ** Listen
+    Identifier (..),
     listen,
     unlisten,
     unlistenAll,
-    Identifier (..),
     escapeIdentifier,
 
     -- ** Await

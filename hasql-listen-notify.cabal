@@ -4,13 +4,13 @@ author: Mitchell Rosen, Travis Staton
 bug-reports: https://github.com/awkward-squad/hasql-listen-notify/issues
 category: Concurrency
 copyright: Copyright (C) 2023 Mitchell Rosen, Travis Staton
-description: LISTEN/NOTIFY with hasql.
+description: LISTEN/NOTIFY with @hasql@.
 homepage: https://github.com/awkward-squad/hasql-listen-notify
 license-file: LICENSE
 license: BSD-3-Clause
 maintainer: Mitchell Rosen <mitchellwrosen@gmail.com>, Travis Staton <hello@travisstaton.com>
 name: hasql-listen-notify
-synopsis: LISTEN/NOTIFY with hasql
+synopsis: LISTEN/NOTIFY with @hasql@
 tested-with: GHC == 9.0.2, GHC == 9.2.5, GHC == 9.4.4
 version: 0.1.0
 
@@ -35,6 +35,7 @@ library
     DeriveGeneric
     DerivingStrategies
     DuplicateRecordFields
+    GeneralizedNewtypeDeriving
     LambdaCase
     NamedFieldPuns
     OverloadedStrings

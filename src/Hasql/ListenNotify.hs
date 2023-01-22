@@ -5,6 +5,8 @@ module Hasql.ListenNotify
     listen,
     unlisten,
     unlistenAll,
+    Identifier (..),
+    escapeIdentifier,
 
     -- ** Await
     Notification (..),
@@ -25,12 +27,10 @@ import Control.Monad.Reader (ask)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Builder as ByteString (Builder)
 import qualified Data.ByteString.Builder as ByteString.Builder
-import qualified Data.ByteString.Builder.Prim as ByteString.Builder.Prim
 import qualified Data.ByteString.Lazy as ByteString.Lazy
 import Data.Functor.Contravariant ((>$<))
 import Data.Text (Text)
 import qualified Data.Text.Encoding as Text
-import Data.Word (Word8)
 import qualified Database.PostgreSQL.LibPQ as LibPQ
 import GHC.Conc.IO (threadWaitRead)
 import GHC.Generics (Generic)
@@ -45,24 +45,24 @@ import System.Posix.Types (CPid)
 -- | Listen to a channel.
 --
 -- https://www.postgresql.org/docs/current/sql-listen.html
-listen :: Text -> Statement () ()
-listen chan =
+listen :: Identifier -> Statement () ()
+listen (Identifier chan) =
   Statement (builderToByteString sql) Encoders.noParams Decoders.noResult False
   where
     sql :: ByteString.Builder
     sql =
-      "LISTEN \"" <> escapeIdentifier chan <> "\""
+      "LISTEN " <> ByteString.Builder.byteString chan
 
 -- | Stop listening to a channel.
 --
 -- https://www.postgresql.org/docs/current/sql-unlisten.html
-unlisten :: Text -> Statement () ()
-unlisten chan =
+unlisten :: Identifier -> Statement () ()
+unlisten (Identifier chan) =
   Statement (builderToByteString sql) Encoders.noParams Decoders.noResult False
   where
     sql :: ByteString.Builder
     sql =
-      "UNLISTEN \"" <> escapeIdentifier chan <> "\""
+      "UNLISTEN " <> ByteString.Builder.byteString chan
 
 -- | Stop listening to all channels.
 --
@@ -70,6 +70,27 @@ unlisten chan =
 unlistenAll :: Statement () ()
 unlistenAll =
   Statement "UNLISTEN *" Encoders.noParams Decoders.noResult False
+
+-- | A Postgres identifier.
+newtype Identifier
+  = Identifier ByteString
+  deriving newtype (Eq, Ord, Show)
+
+-- | Escape a string as a Postgres identifier.
+--
+--
+-- https://www.postgresql.org/docs/15/libpq-exec.html
+escapeIdentifier :: Text -> Session Identifier
+escapeIdentifier text = do
+  libpq (\conn -> try (escapeIdentifier_ conn text)) >>= \case
+    Left err -> throwError err
+    Right identifier -> pure (Identifier identifier)
+
+escapeIdentifier_ :: LibPQ.Connection -> Text -> IO ByteString
+escapeIdentifier_ conn text =
+  LibPQ.escapeIdentifier conn (Text.encodeUtf8 text) >>= \case
+    Nothing -> throwQueryError conn "PQescapeIdentifier()" [text]
+    Just identifier -> pure identifier
 
 -- | An incoming notification.
 data Notification = Notification
@@ -166,21 +187,21 @@ notify =
 pqConsumeInput :: LibPQ.Connection -> IO ()
 pqConsumeInput conn =
   LibPQ.consumeInput conn >>= \case
-    False -> throwQueryError conn "PQconsumeInput()"
+    False -> throwQueryError conn "PQconsumeInput()" []
     True -> pure ()
 
 pqReset :: LibPQ.Connection -> IO ()
 pqReset conn = do
   LibPQ.reset conn
   LibPQ.status conn >>= \case
-    LibPQ.ConnectionOk -> throwQueryError conn "PQreset()"
+    LibPQ.ConnectionOk -> throwQueryError conn "PQreset()" []
     _ -> pure ()
 
 -- Throws a QueryError
-throwQueryError :: LibPQ.Connection -> ByteString -> IO void
-throwQueryError conn context = do
+throwQueryError :: LibPQ.Connection -> ByteString -> [Text] -> IO void
+throwQueryError conn context params = do
   message <- LibPQ.errorMessage conn
-  throwIO (Session.QueryError context [] (Session.ClientError message))
+  throwIO (Session.QueryError context params (Session.ClientError message))
 
 --
 
@@ -193,23 +214,6 @@ builderToByteString :: ByteString.Builder -> ByteString
 builderToByteString =
   ByteString.Lazy.toStrict . ByteString.Builder.toLazyByteString
 {-# INLINE builderToByteString #-}
-
--- Escape " as "", so e.g. `listen "foo\"bar"` will send the literal bytes: LISTEN "foo""bar"
-escapeIdentifier :: Text -> ByteString.Builder
-escapeIdentifier ident =
-  Text.encodeUtf8BuilderEscaped escape ident
-  where
-    escape :: ByteString.Builder.Prim.BoundedPrim Word8
-    escape =
-      ByteString.Builder.Prim.condB
-        (== 34) -- double-quote
-        ( ByteString.Builder.Prim.liftFixedToBounded
-            ( const ('"', '"')
-                ByteString.Builder.Prim.>$< ByteString.Builder.Prim.char7
-                  ByteString.Builder.Prim.>*< ByteString.Builder.Prim.char7
-            )
-        )
-        (ByteString.Builder.Prim.liftFixedToBounded ByteString.Builder.Prim.word8)
 
 -- Parse a Notify from a LibPQ.Notify
 parseNotification :: LibPQ.Notify -> Notification

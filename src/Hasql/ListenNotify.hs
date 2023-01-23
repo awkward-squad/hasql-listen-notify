@@ -1,14 +1,11 @@
+-- | @LISTEN@/@NOTIFY@ with @hasql@.
 module Hasql.ListenNotify
   ( -- * Listen
-
-    -- ** Listen
     Identifier (..),
     listen,
     unlisten,
     unlistenAll,
     escapeIdentifier,
-
-    -- ** Await
     Notification (..),
     await,
     poll,

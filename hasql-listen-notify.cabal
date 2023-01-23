@@ -10,7 +10,7 @@ license-file: LICENSE
 license: BSD-3-Clause
 maintainer: Mitchell Rosen <mitchellwrosen@gmail.com>, Travis Staton <hello@travisstaton.com>
 name: hasql-listen-notify
-synopsis: LISTEN/NOTIFY with @hasql@
+synopsis: LISTEN/NOTIFY with hasql
 tested-with: GHC == 9.0.2, GHC == 9.2.5, GHC == 9.4.4
 version: 0.1.0
 

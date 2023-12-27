@@ -12,8 +12,7 @@ maintainer: Mitchell Rosen <mitchellwrosen@gmail.com>, Travis Staton <hello@trav
 name: hasql-listen-notify
 synopsis: LISTEN/NOTIFY with hasql
 tested-with: GHC == 9.4.8, GHC == 9.6.3, GHC == 9.8.1
-version: 0.1.0
-x-revision: 3
+version: 0.1.0.1
 
 extra-doc-files:
   CHANGELOG.md

@@ -1,14 +1,14 @@
 cabal-version: 2.2
 
-author: Mitchell Rosen, Travis Staton
+author: Mitchell Dalvi Rosen, Travis Staton
 bug-reports: https://github.com/awkward-squad/hasql-listen-notify/issues
-category: Concurrency
-copyright: Copyright (C) 2023 Mitchell Rosen, Travis Staton
+category: Hasql, PostgreSQL
+copyright: Copyright (C) 2023-2024 Mitchell Dalvi Rosen, Travis Staton
 description: LISTEN/NOTIFY with @hasql@.
 homepage: https://github.com/awkward-squad/hasql-listen-notify
 license-file: LICENSE
 license: BSD-3-Clause
-maintainer: Mitchell Rosen <mitchellwrosen@gmail.com>, Travis Staton <hello@travisstaton.com>
+maintainer: Mitchell Dalvi Rosen <mitchellwrosen@gmail.com>, Travis Staton <hello@travisstaton.com>
 name: hasql-listen-notify
 synopsis: LISTEN/NOTIFY with hasql
 tested-with: GHC == 9.6.5, GHC == 9.8.2, GHC == 9.10.1
